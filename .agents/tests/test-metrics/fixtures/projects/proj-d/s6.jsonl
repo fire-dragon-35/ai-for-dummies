@@ -1,0 +1,2 @@
+{"type":"user","timestamp":"2026-10-16T14:00:00.000Z","cwd":"/elsewhere/other","isSidechain":false,"promptId":"p6","origin":{"kind":"human"},"message":{"role":"user","content":"prompt from another repository"}}
+{"type":"assistant","timestamp":"2026-10-16T14:00:03.000Z","cwd":"/elsewhere/other","isSidechain":false,"message":{"id":"m11","usage":{"input_tokens":1,"output_tokens":1,"cache_read_input_tokens":1,"cache_creation_input_tokens":1},"content":[{"type":"text","text":"reply"}]}}

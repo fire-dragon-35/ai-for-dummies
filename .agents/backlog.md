@@ -1,0 +1,2 @@
+- CI runs the tests serially because ubuntu-latest has no GNU parallel; it takes about 2 minutes. Install `parallel` in the `lint-and-test` job of `.github/workflows/agents.yml`
+- A stale repository map passes the hooks and fails only in CI's `map` job, after the push. Run the same `generate.sh` and `git diff --exit-code` check in pre-push and let CI reuse it

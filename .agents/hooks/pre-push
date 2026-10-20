@@ -1,0 +1,60 @@
+#!/bin/sh
+# shellcheck disable=SC2016,SC2154
+# shellcheck disable=SC1091
+. "$(dirname "$0")/common.sh"
+echo "pre-push" >&2
+count=$(git ls-files '*.sh' '.agents/hooks/*' | grep -c .)
+if git ls-files -z '*.sh' '.agents/hooks/*' | xargs -0 -r sh -c '. "$0" && run_shellcheck "$@"' "$(dirname "$0")/common.sh" >&2; then
+  mark pass shellcheck "$count shell files"
+else
+  mark fail shellcheck "findings above"
+  exit 1
+fi
+[ -d .agents/tests ] || exit 0
+reports=$(mktemp -d) || exit 1
+trap 'rm -rf "$reports"' EXIT
+set -- --formatter tap --report-formatter tap -o "$reports" -r .agents/tests
+! command -v parallel > /dev/null 2>&1 || set -- --jobs "$(getconf _NPROCESSORS_ONLN)" "$@"
+[ -t 2 ] && terminal=1 || terminal=0
+started=$(date +%s)
+{ npx --yes bats@1.13.0 "$@"; echo "$?" > "$reports/status"; } | awk -v terminal="$terminal" -v counts="$reports/counts" '
+  function paint(text, color) { return terminal ? "\033[" color "m" text "\033[0m" : text }
+  function progress(mark) {
+    if (column == 0) printf "  "
+    printf "%s", mark
+    if (++column == 60) { printf "\n"; column = 0 }
+    fflush()
+  }
+  /^not ok / { failing = 1; failed++; name = $0; sub(/^not ok [0-9]+ /, "", name); details = details "\n  " paint("F " name, 31); progress(paint("F", 31)); next }
+  /^ok / && / # skip/ { failing = 0; skipped++; progress(paint("s", 33)); next }
+  /^ok / { failing = 0; passed++; progress(paint(".", 32)); next }
+  /^#/ && failing { details = details "\n    " substr($0, 3); next }
+  { failing = 0 }
+  END {
+    if (column) printf "\n"
+    if (details != "") print substr(details, 2)
+    print passed + 0, failed + 0, skipped + 0 > counts
+  }
+' >&2
+status=$(cat "$reports/status")
+read -r passed failed skipped < "$reports/counts"
+[ "$status" -eq 0 ] && color=32 || color=31
+summary="$passed pass, $failed fail, $skipped skip in $(($(date +%s) - started)) s"
+[ "$terminal" -eq 0 ] || summary="\033[${color}m$summary\033[0m"
+printf '  %b\n' "$summary" >&2
+log_duration tests "$started"
+[ -f "$metrics/metrics.mjs" ] || exit "$status"
+grep -E '^(not )?ok [0-9]+ ' "$reports/report.tap" | while IFS= read -r line; do
+  case $line in
+    "not ok"*) result=fail ;;
+    *"# skip"*) result=skip ;;
+    *) result=pass ;;
+  esac
+  sh "$metrics/log.sh" test "$(printf '%s\n' "$line" | sed -E 's/^(not )?ok [0-9]+ //; s/ # skip.*$//')" "$result"
+done
+if page=$(node "$metrics/metrics.mjs" "$PWD" --html 2> /dev/null); then
+  printf '  %s %-15s file://%s\n' '↗' dashboard "$(printf '%s' "$page" | sed 's/ /%20/g')" >&2
+else
+  printf '  %s %-15s %s\n' '-' dashboard 'not written' >&2
+fi
+exit "$status"
