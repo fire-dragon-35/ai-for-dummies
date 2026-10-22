@@ -12,18 +12,21 @@
 - Clean up after yourself: don't leave dead code lying around
 - Don't commit (git)
 - Plan first for larger changes
-- Run independent parts in parallel subagents: subagents that edit files run in worktree isolation and you merge their changes into the checkout
+- Run independent parts in parallel subagents: subagents that edit the same files run in worktree isolation and you merge their changes into the checkout. A subagent that edits only its own directory, such as the `review-tests` one, runs in the checkout
 
 ## `.agents/`
-All agent related work lives here. Create what is missing. Outside it, only files that tools require at fixed paths: `AGENTS.md`, `CLAUDE.md`, `.claude/skills` and `.github/workflows/agents.yml`. Metrics data lives in `.git/ai-for-dummies/` and is never committed
+All agent related work lives here. Create what is missing. Outside it, only the project itself and files that tools require at fixed paths: `AGENTS.md`, `CLAUDE.md` and `.claude/skills`. Metrics data lives in `.git/ai-for-dummies/` and is never committed
+`hooks/`, `metrics/` and `repository-context/*.sh` are tools: run them as described here, don't read them
 
 ### `.agents/tests/`
-One directory per component, named `test-<component>`, such as `test-installer/` or `test-hooks/`, each with a `requirements.md` and its tests. Write or change them before implementing a feature or bug fix
+One directory per component, named `test-<component>`, such as `test-installer/` or `test-hooks/`, each with a `requirements.md`. Write or change requirements and tests before implementing a feature or bug fix
 1. Add requirements to the component the change touches, or create a new `test-<component>` directory whose `requirements.md` starts with `# <Component>` and one sentence on why it exists
 2. Write requirements in EARS format ("When <trigger>, the <system> shall <response>."), one observable behavior each, no implementation details. Number them R1, R2... within the component. Change a requirement in place, never renumber, and never reuse the number of a deleted one
-3. Write runnable tests with the requirement number in each test name. Assert behavior such as exit status, created files and names in output, not incidental formatting, counts or file lists
-4. Spawn a subagent that runs the `review-tests` skill on the component. It writes the component's fingerprint to `reviewed`. With hooks, the pre-commit hook rejects test changes without a fresh review
-5. Iterate until all tests pass. Never change tests to make them pass. If stuck, stop and report the failing tests
+3. Write runnable tests whose names start with the requirement number, as `R1: ...`. Assert behavior such as exit status, created files and names in output, not incidental formatting, counts or file lists
+   - Project code: tests go where the project's test runner expects them. List their files, one path from the repository root per line, in the component's `tests` file, and put the command that runs all project tests, such as `npm test`, in `.agents/test-command`
+   - Agent setup: tests are bats files in the component directory
+4. Spawn a subagent that runs the `review-tests` skill on the component. It writes the component's fingerprint to `reviewed`. With hooks, the QA run reports components whose review is stale
+5. Run `sh .agents/hooks/qa.sh` in the background and iterate until all checks and tests pass. Never change tests to make them pass. If stuck, stop and report the failing tests
 
 ### `.agents/repository-context/`
 Directory tree of the repository in `directories.md`. Read it instead of scanning the repository
@@ -46,9 +49,10 @@ Read a skill's file when its use matches the task
 
 | Skill | Use it when | File |
 |---|---|---|
+| benchmark | Compare cost, time, tokens, lines written and code quality for the same prompt in fresh repositories with and without this agent setup. Use when the user wants to measure the effect of a change to the setup | `.agents/skills/benchmark/SKILL.md` |
 | context | Regenerate the repository map and the skills table and load the map. Use at the start of a task or after directories or skills change | `.agents/skills/context/SKILL.md` |
 | grilling | Grill the user relentlessly about a plan, decision, or idea. Use when the user wants to stress-test their thinking, or uses any 'grill' trigger phrases. | `.agents/skills/grilling/SKILL.md` |
-| metrics | Report token usage, cost, energy, time per prompt, tools, MCP servers and check and test verdicts of this repository, as text or as a dashboard. Use when the user asks about usage, cost, speed or which checks and tests fail | `.agents/skills/metrics/SKILL.md` |
+| metrics | Report token usage, cost, energy, time per prompt, tools, MCP servers and check and test verdicts of this repository. Use when the user asks about usage, cost, speed or which checks and tests fail | `.agents/skills/metrics/SKILL.md` |
 | review-tests | Review the requirements and tests of one .agents/tests/<component> directory as an unbiased reviewer. Use when AGENTS.md asks for a test review | `.agents/skills/review-tests/SKILL.md` |
 | scout | Check the web sources for new MCP servers, skills and AI news relevant to this repository. Use when the user asks for toplists, new tools, latest news or trends | `.agents/skills/scout/SKILL.md` |
 <!-- ai-for-dummies:end -->

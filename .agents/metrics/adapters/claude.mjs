@@ -81,7 +81,9 @@ const counted = (names) => {
 }
 
 const isHuman = (entry) =>
-  entry.type === 'user' && typeof entry.message?.content === 'string' && entry.origin?.kind === 'human'
+  entry.type === 'user' &&
+  typeof entry.message?.content === 'string' &&
+  (entry.origin?.kind === 'human' || (entry.entrypoint === 'sdk-cli' && !entry.origin && !entry.isMeta))
 
 const toolCalls = (span) => {
   const calls = new Map()

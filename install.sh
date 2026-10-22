@@ -1,21 +1,17 @@
 #!/bin/sh
 update=0
 hooks=0
-metrics=0
-ci=0
 name=
 for arg; do
   case $arg in
     --update) update=1 ;;
     --hooks) hooks=1 ;;
-    --metrics) metrics=1 ;;
-    --ci) ci=1 ;;
     -*) name=--usage ;;
     *) [ -z "$name" ] && name=$arg || name=--usage ;;
   esac
 done
 if [ -z "$name" ] || [ "$name" = --usage ]; then
-  echo "usage: sh install.sh [--update] [--hooks] [--metrics] [--ci] <target-repository>" >&2
+  echo "usage: sh install.sh [--update] [--hooks] <target-repository>" >&2
   exit 2
 fi
 source=$(cd "$(dirname "$0")" && pwd) || exit 1
@@ -36,39 +32,36 @@ elif [ "$update" -eq 1 ]; then
   exit 1
 fi
 new_hooks=$hooks
+old_hooks=0
 if [ "$update" -eq 1 ]; then
-  if [ -e "$target/.agents/hooks/pre-commit" ]; then
+  [ ! -e "$target/.agents/hooks/pre-commit" ] || old_hooks=1
+  if [ -e "$target/.agents/hooks/post-commit" ]; then
     hooks=1
     new_hooks=0
+  elif [ "$old_hooks" -eq 1 ] || [ -d "$target/.agents/metrics" ]; then
+    hooks=1
+    new_hooks=1
   fi
-  [ ! -d "$target/.agents/metrics" ] || metrics=1
-  [ ! -e "$target/.github/workflows/agents.yml" ] || ci=1
-fi
-if [ "$ci" -eq 1 ] && [ "$hooks" -eq 0 ]; then
-  echo "--ci runs the hooks in CI, so it needs --hooks" >&2
-  exit 1
 fi
 if [ "$new_hooks" -eq 1 ]; then
   existing=$(git -C "$target" config --local --get core.hooksPath)
-  if [ -n "$existing" ]; then
+  if [ -n "$existing" ] && { [ "$old_hooks" -eq 0 ] || [ "$existing" != .agents/hooks ]; }; then
     echo "core.hooksPath is already set to $existing in $name. Install without --hooks" >&2
     exit 1
   fi
-  active=$(cd "$target" && find "$(git rev-parse --git-path hooks)" -type f ! -name '*.sample' 2>/dev/null)
-  if [ -n "$active" ]; then
-    printf 'The repository already has git hooks, so --hooks would replace them:\n%s\n' "$active" >&2
+  hook="$(git -C "$target" rev-parse --path-format=absolute --git-common-dir)/hooks/post-commit"
+  if [ -e "$hook" ]; then
+    echo "The repository already has the git hook $hook, so --hooks would replace it" >&2
     exit 1
   fi
 fi
 cd "$source" || exit 1
 files=$(echo .claude/skills
-  find .agents/skills -type f ! -path '.agents/skills/metrics/*'
+  find .agents/skills -type f ! -path '.agents/skills/metrics/*' ! -path '.agents/skills/benchmark/*'
   echo .agents/repository-context/generate.sh
   echo .agents/repository-context/skills.sh
   [ "$update" -eq 1 ] || echo .agents/web-sources.md
-  [ "$hooks" -eq 0 ] || find .agents/hooks -type f
-  [ "$metrics" -eq 0 ] || find .agents/metrics .agents/skills/metrics -type f
-  [ "$ci" -eq 0 ] || echo .github/workflows/agents.yml)
+  [ "$hooks" -eq 0 ] || find .agents/hooks .agents/metrics .agents/skills/metrics -type f)
 set -f
 IFS='
 '
@@ -114,7 +107,16 @@ if ! grep -qxF '@AGENTS.md' "$target/CLAUDE.md" 2>/dev/null; then
   printf '%s\n' "$start" '@AGENTS.md' "$end" >> "$target/CLAUDE.md"
 fi
 (cd "$target" && sh .agents/repository-context/skills.sh && sh .agents/repository-context/generate.sh) || exit 1
-[ "$new_hooks" -eq 0 ] || git -C "$target" config core.hooksPath .agents/hooks || exit 1
+if [ "$old_hooks" -eq 1 ]; then
+  rm -f "$target/.agents/hooks/pre-commit" "$target/.agents/hooks/pre-push" "$target/.github/workflows/agents.yml"
+  rmdir "$target/.github/workflows" "$target/.github" 2> /dev/null
+  [ "$(git -C "$target" config --local --get core.hooksPath)" != .agents/hooks ] || git -C "$target" config --local --unset core.hooksPath || exit 1
+fi
+if [ "$new_hooks" -eq 1 ]; then
+  mkdir -p "$(dirname "$hook")" || exit 1
+  # shellcheck disable=SC2016
+  printf '%s\n' '#!/bin/sh' 'exec sh "$(git rev-parse --show-toplevel)/.agents/hooks/post-commit"' > "$hook" && chmod +x "$hook" || exit 1
+fi
 if [ "$update" -eq 1 ]; then
   printf "Updated the agent setup in %s\nNext, commit the changes: git add . && git commit\n" "$name"
 else

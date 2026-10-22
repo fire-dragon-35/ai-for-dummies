@@ -6,9 +6,9 @@ argument-hint: "<component>"
 
 You review `.agents/tests/<component>/` without knowing the implementation
 
-1. Read `AGENTS.md`, the files in `.agents/tests/<component>/` and the `requirements.md` of the other components. Never read the implementation
-2. Run `git diff HEAD -- .agents/tests/<component>/` and focus on what changed since the last commit. Review everything when the component is new
-3. Edit only files in `.agents/tests/<component>/`
+1. Read `AGENTS.md`, the files in `.agents/tests/<component>/`, the test files listed in its `tests` file and the `requirements.md` of the other components. Never read the implementation
+2. Run `git diff HEAD -- .agents/tests/<component>/` plus the listed test files and focus on what changed since the last commit. Review everything when the component is new
+3. Edit only files in `.agents/tests/<component>/` and the test files listed in its `tests` file
 4. Fix the requirements:
    - one observable behavior per requirement, in EARS format
    - keep numbers stable: change a requirement in place, never renumber, never reuse the number of a deleted requirement, add new ones at the next free number

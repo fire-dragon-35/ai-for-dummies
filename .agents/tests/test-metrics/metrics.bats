@@ -5,10 +5,6 @@ setup() {
   setup_metrics_repo
 }
 
-line() {
-  printf '%s\n' "$output" | grep -E "^$1( |$)"
-}
-
 cost() {
   line cost | sed -E 's/^cost +\$([0-9]+\.[0-9]).*$/\1/'
 }
@@ -41,20 +37,37 @@ models() {
   [ -z "$(line tools)$(line 'mcp servers')$(line commands)" ]
 }
 
-@test "R3: prints checks, test totals and the most failing tests" {
-  check_result shellcheck pass
+@test "R3: prints the latest result of checks and tests and the failing tests" {
   check_result shellcheck fail
+  check_result shellcheck pass
   check_result "line limit" pass
+  check_result "line limit" fail
+  verdict check "line limit" fail "long.txt (401 lines)" .agents/hooks/qa.sh
   verdict test "R1: a" pass
   verdict test "R2: b" fail
   verdict test "R2: b" fail
   verdict test "R3: c" fail
+  verdict test "R3: c" pass
   verdict test "R4: d" skip
+  verdict test "R5: e" fail
   run report
-  [[ "$(line shellcheck)" =~ ^shellcheck\ +1\ pass,\ 1\ fail$ ]]
-  [[ "$(line 'line limit')" =~ ^line\ limit\ +1\ pass,\ 0\ fail$ ]]
-  [[ "$(line tests)" =~ ^tests\ +1\ pass,\ 3\ fail,\ 1\ skip$ ]]
-  [[ "$(line failing)" =~ ^failing\ +R2:\ b\ 2,\ R3:\ c\ 1$ ]]
+  [[ "$(line shellcheck)" =~ ^shellcheck\ +✓ ]]
+  [[ "$(line 'line limit')" =~ ^line\ limit\ +✗\ long.txt\ \(401\ lines\)$ ]]
+  [[ "$(line tests)" =~ ^tests\ +✗\ 2\ pass,\ 2\ fail,\ 1\ skip$ ]]
+  [[ "$(line failing)" =~ ^failing\ +R2:\ b,\ R5:\ e$ ]]
+  verdict test "R2: b" pass
+  verdict test "R5: e" skip
+  run report
+  [[ "$(line tests)" =~ ^tests\ +✓\ 3\ pass,\ 0\ fail,\ 2\ skip$ ]]
+}
+
+@test "R3: counts only the tests of the latest run" {
+  verdict test "R1: old" fail "100"
+  verdict test "R2: kept" pass "100"
+  verdict test "R2: kept" pass "200"
+  run report
+  [[ "$(line tests)" =~ ^tests\ +✓\ 1\ pass,\ 0\ fail,\ 0\ skip$ ]]
+  [ -z "$(line failing)" ]
 }
 
 @test "R4: prints no metrics yet without records" {
@@ -94,11 +107,73 @@ models() {
   [[ "$output" != *SECRET* ]]
 }
 
+@test "R111: prints how many requirements each test component tests" {
+  check_result shellcheck pass
+  components
+  run report
+  [[ "$(line coverage)" == *"test-alpha 1/2"* && "$(line coverage)" == *"test-beta 1/1"* ]]
+  [ "$(line coverage | wc -l)" -eq 1 ]
+}
+
+@test "R111: counts test names in the files listed in a component's tests file" {
+  check_result shellcheck pass
+  mkdir -p "$repo/.agents/tests/test-app" "$repo/test"
+  printf '# App\n- R1: a\n- R2: b\n- R3: c\n' > "$repo/.agents/tests/test-app/requirements.md"
+  printf 'test/app.test.js\n' > "$repo/.agents/tests/test-app/tests"
+  printf "test('R1: adds', () => {})\ntest(\"R3: lists\", () => {})\n// R2: not a test name\n" > "$repo/test/app.test.js"
+  run report
+  [[ "$(line coverage)" == *"test-app 2/3"* ]]
+}
+
+@test "R127: ignores a listed test file that does not exist" {
+  check_result shellcheck pass
+  components
+  printf '.agents/tests/test-alpha/gone.bats\n' > "$repo/.agents/tests/test-alpha/tests"
+  run --separate-stderr report
+  [ "$status" -eq 0 ]
+  [[ "$(line coverage)" == *"test-alpha 1/2"* ]]
+}
+
+@test "R112: prints how many backlog items there are" {
+  check_result shellcheck pass
+  printf '%s\n' '- first' '' '- second' > "$repo/.agents/backlog.md"
+  run report
+  [[ "$(line backlog)" =~ ^backlog\ +2\ items$ ]]
+  rm "$repo/.agents/backlog.md"
+  run report
+  [ -z "$(line backlog)" ]
+}
+
+@test "R113: prints escape sequences only when asked for and not refused" {
+  check_result shellcheck fail
+  run report
+  [[ "$output" == *✗* && "$output" != *$'\033'* ]]
+  FORCE_COLOR=1 run report
+  [[ "$output" == *$'\033['* ]]
+  NO_COLOR=1 FORCE_COLOR=1 run report
+  [[ "$output" == *✗* && "$output" != *$'\033'* ]]
+}
+
 @test "R73: writes times below a minute in seconds" {
   adapter claude "$(record claude 45000 60000 '{}' '{}' '[]' "$zero" "$zero" 0 '{}')"
   run report
   [[ "$(line wall)" =~ ^wall\ +45\.0\ s$ ]]
   [[ "$(line active)" =~ ^active\ +1\.0\ min$ ]]
+}
+
+@test "R73: writes times below an hour in minutes and from an hour in hours" {
+  adapter claude "$(record claude 4320000 1800000 '{}' '{}' '[]' "$zero" "$zero" 0 '{}')"
+  run report
+  [[ "$(line wall)" =~ ^wall\ +1\.2\ h$ ]]
+  [[ "$(line active)" =~ ^active\ +30\.0\ min$ ]]
+}
+
+@test "R103: lists no check without a source or with a source that does not exist" {
+  verdict check nosource pass
+  verdict check gone pass "" .agents/hooks/removed
+  check_result alive pass
+  run report
+  [[ "$output" == *alive* && "$output" != *nosource* && "$output" != *gone* ]]
 }
 
 @test "R8: prices every token type of every model" {
@@ -244,8 +319,6 @@ models() {
   [[ "$(line energy)" =~ ^energy\ +unavailable ]]
 }
 
-@test "R29: the skill names the report and the dashboard command" {
-  skill="$source_root/.agents/skills/metrics/SKILL.md"
-  grep -qF 'node .agents/metrics/metrics.mjs' "$skill"
-  grep -qF 'node .agents/metrics/metrics.mjs --html' "$skill"
+@test "R29: the skill names the report command" {
+  grep -qF 'node .agents/metrics/metrics.mjs' "$source_root/.agents/skills/metrics/SKILL.md"
 }

@@ -1,6 +1,6 @@
 import { loadCached } from './cache.mjs'
 
-export const modelsUrl = 'https://raw.githubusercontent.com/mlco2/ecologits/main/ecologits/data/models.json'
+const modelsUrl = 'https://raw.githubusercontent.com/mlco2/ecologits/main/ecologits/data/models.json'
 
 const batch = 64
 const quantizationBits = 16

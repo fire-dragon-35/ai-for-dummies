@@ -232,3 +232,21 @@ sums() {
   run adapt
   [ "$(field p2 'Object.keys(x.models).join(",")')" = "unknown" ]
 }
+
+@test "R39: a text prompt of a non-interactive run starts a prompt, its meta entries, tool results and notifications do not" {
+  mkdir -p "$CLAUDE_CONFIG_DIR/projects/proj-h"
+  cat > "$CLAUDE_CONFIG_DIR/projects/proj-h/s7.jsonl" <<JSON
+{"type":"user","timestamp":"2026-10-17T09:00:00.000Z","cwd":"$repo","entrypoint":"sdk-cli","isMeta":true,"promptId":"pm","message":{"role":"user","content":"meta"}}
+{"type":"user","timestamp":"2026-10-17T09:00:01.000Z","cwd":"$repo","entrypoint":"sdk-cli","promptId":"ph","message":{"role":"user","content":"build it"}}
+{"type":"assistant","timestamp":"2026-10-17T09:00:03.000Z","cwd":"$repo","entrypoint":"sdk-cli","message":{"id":"mt","content":[{"type":"tool_use","id":"tu","name":"Bash","input":{}}]}}
+{"type":"user","timestamp":"2026-10-17T09:00:04.000Z","cwd":"$repo","entrypoint":"sdk-cli","promptId":"pt","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"tu","content":"ok"}]}}
+{"type":"user","timestamp":"2026-10-17T09:00:04.500Z","cwd":"$repo","entrypoint":"sdk-cli","origin":{"kind":"task-notification"},"promptId":"pn","message":{"role":"user","content":"task done"}}
+{"type":"assistant","timestamp":"2026-10-17T09:00:05.000Z","cwd":"$repo","entrypoint":"sdk-cli","message":{"id":"mh","usage":{"input_tokens":2,"output_tokens":3,"cache_read_input_tokens":0,"cache_creation_input_tokens":0},"content":[{"type":"text","text":"done"}]}}
+{"type":"user","timestamp":"2026-10-17T09:00:06.000Z","cwd":"$repo","entrypoint":"cli","promptId":"pl","message":{"role":"user","content":"<command-name>/clear</command-name>"}}
+JSON
+  run adapt
+  [ "$status" -eq 0 ]
+  [ "$(prompts)" = "$human_prompts,ph" ]
+  [ "$(field ph 'x.wall_ms')" = 4000 ]
+  [ "$(field ph 'x.tools.Bash')" = 1 ]
+}

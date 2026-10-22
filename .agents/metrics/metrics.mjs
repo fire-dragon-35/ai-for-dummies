@@ -1,20 +1,13 @@
-import { mkdirSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
-import { render } from './dashboard.mjs'
-import { commonGitDirectory, duration, formatCost, formatEnergy, headCommit, loadAll, resolveRepository, summarize } from './summary.mjs'
+import { brief } from './brief.mjs'
+import { mark } from './terminal.mjs'
+import { duration, formatCost, formatEnergy, loadAll, resolveRepository, summarize } from './summary.mjs'
 
 const args = process.argv.slice(2)
-const html = args.indexOf('--html')
-const file = html >= 0 && args[html + 1] && !args[html + 1].startsWith('--') ? args[html + 1] : null
-const target = args.find((arg, index) => arg !== '--html' && !(file && index === html + 1)) ?? '.'
-const repo = resolveRepository(target)
+const repo = resolveRepository(args.find((arg) => !arg.startsWith('--')) ?? '.')
 const summary = summarize(await loadAll(repo))
 
-if (html >= 0) {
-  const output = resolve(file ?? join(commonGitDirectory(repo), 'ai-for-dummies', 'dashboard.html'))
-  mkdirSync(dirname(output), { recursive: true })
-  writeFileSync(output, render(summary, { path: repo, commit: headCommit(repo), generated: new Date() }))
-  console.log(output)
+if (args.includes('--brief')) {
+  console.log(brief(summary))
   process.exit(0)
 }
 
@@ -40,11 +33,15 @@ if (summary.prompts) {
     ...top('commands', summary.commands),
   )
 }
-for (const check of summary.checks) lines.push(row(check.name, `${check.pass} pass, ${check.fail} fail`))
+for (const check of summary.checks) lines.push(row(check.name, `${mark(check.latest.result === 'pass')} ${check.latest.detail}`.trim()))
 if (summary.tests) {
+  const { latest } = summary.tests
   lines.push(
-    row('tests', `${summary.tests.pass} pass, ${summary.tests.fail} fail, ${summary.tests.skip} skip`),
-    ...top('failing', summary.failing),
+    row('tests', `${mark(latest.fail === 0)} ${latest.pass} pass, ${latest.fail} fail, ${latest.skip} skip`),
+    ...(latest.failing.length ? [row('failing', latest.failing.slice(0, 5).join(', '))] : []),
   )
 }
+const { coverage, backlog } = summary
+if (lines.length && coverage.length) lines.push(row('coverage', coverage.map(({ component, requirements }) => `${component} ${requirements.filter((requirement) => requirement.tested).length}/${requirements.length}`).join(', ')))
+if (lines.length && backlog) lines.push(row('backlog', `${backlog} ${backlog === 1 ? 'item' : 'items'}`))
 console.log(lines.length ? lines.join('\n') : 'no metrics yet')

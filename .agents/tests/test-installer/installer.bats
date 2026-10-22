@@ -13,16 +13,16 @@ install() {
 }
 
 core_files() {
-  (cd "$source_root" && find .agents/skills -name SKILL.md ! -path '*/metrics/*'
+  (cd "$source_root" && find .agents/skills -name SKILL.md ! -path '*/metrics/*' ! -path '*/benchmark/*'
     printf '%s\n' .agents/repository-context/generate.sh .agents/repository-context/skills.sh .agents/web-sources.md)
 }
 
 hook_files() {
-  (cd "$source_root" && find .agents/hooks -type f)
+  (cd "$source_root" && find .agents/hooks .agents/metrics -type f; echo .agents/skills/metrics/SKILL.md)
 }
 
-metrics_files() {
-  (cd "$source_root" && find .agents/metrics -type f; echo .agents/skills/metrics/SKILL.md)
+git_hook() {
+  echo "$target/.git/hooks/post-commit"
 }
 
 same() {
@@ -63,21 +63,21 @@ rules() {
   grep -qx 'app.py' "$target/.agents/repository-context/directories.md"
 }
 
-@test "R2: a plain install adds no hooks, metrics or CI and leaves .git alone" {
+@test "R2: a plain install adds no hooks and leaves .git alone" {
   before="$(cd "$target/.git" && find . -path ./objects -prune -o -type f -print | sort | xargs cksum)"
   run install "$target"
   [ "$status" -eq 0 ]
   hook_files | none
-  metrics_files | none
-  [ ! -e "$target/.github/workflows/agents.yml" ]
   [ "$(cd "$target/.git" && find . -path ./objects -prune -o -type f -print | sort | xargs cksum)" = "$before" ]
 }
 
-@test "R3: --hooks copies the hooks and sets core.hooksPath" {
+@test "R3: --hooks copies the hook files and writes a git hook that runs the post-commit hook" {
   run install --hooks "$target"
   [ "$status" -eq 0 ]
   hook_files | same
-  [ "$(git -C "$target" config --local core.hooksPath)" = .agents/hooks ]
+  [ -x "$(git_hook)" ]
+  [ -z "$(git -C "$target" config --local core.hooksPath)" ]
+  grep -qF .agents/hooks/post-commit "$(git_hook)"
 }
 
 @test "R4: --hooks refuses a target with its own hooks setting" {
@@ -89,42 +89,22 @@ rules() {
   [ "$(snapshot)" = "$before" ]
 }
 
-@test "R4: --hooks refuses a target with an active git hook but accepts samples" {
-  touch "$target/.git/hooks/pre-commit.sample"
-  printf '%s\n' '#!/bin/sh' > "$target/.git/hooks/pre-commit"
+@test "R4: --hooks refuses a target with a git hook" {
+  printf '%s\n' '#!/bin/sh' > "$(git_hook)"
   before="$(snapshot)"
   run --separate-stderr install --hooks "$target"
   [ "$status" -ne 0 ]
-  [[ "$stderr" == *pre-commit* ]]
+  [[ "$stderr" == *post-commit* ]]
   [ "$(snapshot)" = "$before" ]
-  rm "$target/.git/hooks/pre-commit"
+}
+
+@test "R15: --hooks leaves other git hooks and samples in place" {
+  printf '%s\n' '#!/bin/sh' 'echo mine' > "$target/.git/hooks/pre-commit"
+  touch "$target/.git/hooks/post-commit.sample"
   run install --hooks "$target"
   [ "$status" -eq 0 ]
-}
-
-@test "R5: --metrics copies the metrics files" {
-  run install --metrics "$target"
-  [ "$status" -eq 0 ]
-  metrics_files | same
-  hook_files | none
-}
-
-@test "R6: --ci with --hooks copies the CI file" {
-  run install --hooks --ci "$target"
-  [ "$status" -eq 0 ]
-  cmp "$source_root/.github/workflows/agents.yml" "$target/.github/workflows/agents.yml"
-}
-
-@test "R14: --ci without hooks is refused on install and update" {
-  before="$(snapshot)"
-  run install --ci "$target"
-  [ "$status" -ne 0 ]
-  [ "$(snapshot)" = "$before" ]
-  install "$target"
-  before="$(snapshot)"
-  run install --update --ci "$target"
-  [ "$status" -ne 0 ]
-  [ "$(snapshot)" = "$before" ]
+  [ "$(cat "$target/.git/hooks/pre-commit")" = "$(printf '%s\n' '#!/bin/sh' 'echo mine')" ]
+  [ -e "$target/.git/hooks/post-commit.sample" ]
 }
 
 @test "R7: .claude/skills shows the same skills" {
@@ -172,6 +152,16 @@ rules() {
   [[ "$output" == *"git add . && git commit"* ]]
 }
 
+@test "R17: install and update copy no file of the benchmark skill" {
+  [ -e "$source_root/.agents/skills/benchmark/SKILL.md" ]
+  install --hooks "$target"
+  [ ! -e "$target/.agents/skills/benchmark" ]
+  [ ! -e "$target/.claude/skills/benchmark" ]
+  run install --update --hooks "$target"
+  [ "$status" -eq 0 ]
+  [ ! -e "$target/.agents/skills/benchmark" ]
+}
+
 @test "R10: prints usage for an unknown option or a missing target" {
   run --separate-stderr install --bogus "$target"
   [ "$status" -eq 2 ]
@@ -181,19 +171,24 @@ rules() {
   [[ "${stderr,,}" == *usage* ]]
 }
 
+@test "R10: prints usage for the removed options --metrics and --ci" {
+  for option in --metrics --ci; do
+    run --separate-stderr install "$option" "$target"
+    [ "$status" -eq 2 ]
+    [[ "${stderr,,}" == *usage* ]]
+  done
+}
+
 @test "R11: update refreshes the block and the installed parts and keeps other lines" {
-  install --hooks --metrics --ci "$target"
+  install --hooks "$target"
   printf '%s\n' 'after the block' >> "$target/AGENTS.md"
   awk '{ print } /^<!-- ai-for-dummies:start -->$/ { print "- outdated rule" }' "$target/AGENTS.md" > "$target/AGENTS.tmp" && mv "$target/AGENTS.tmp" "$target/AGENTS.md"
-  echo changed > "$target/.agents/hooks/pre-commit"
-  echo changed > "$target/.github/workflows/agents.yml"
+  echo changed > "$target/.agents/hooks/qa.sh"
   rm "$target/.agents/metrics/log.sh" "$target/.agents/skills/context/SKILL.md"
   run install --update "$target"
   [ "$status" -eq 0 ]
   core_files | same
   hook_files | same
-  metrics_files | same
-  cmp "$source_root/.github/workflows/agents.yml" "$target/.github/workflows/agents.yml"
   [ "$(rules "$target/AGENTS.md")" = "$(rules "$source_root/AGENTS.md")" ]
   [ "$(tail -n 1 "$target/AGENTS.md")" = 'after the block' ]
 }
@@ -203,20 +198,20 @@ rules() {
   run install --update "$target"
   [ "$status" -eq 0 ]
   hook_files | none
-  metrics_files | none
-  run install --update --metrics "$target"
+  run install --update --hooks "$target"
   [ "$status" -eq 0 ]
-  metrics_files | same
+  hook_files | same
+  [ -x "$(git_hook)" ]
 }
 
 @test "R12: update keeps the target's own files and hooks setting" {
-  install --hooks --metrics "$target"
+  install --hooks "$target"
   mkdir -p "$target/.agents/tests/test-app" "$target/.agents/skills/own"
   for f in .agents/tests/test-app/requirements.md .agents/backlog.md .agents/scout.md .agents/web-sources.md .agents/skills/own/SKILL.md; do
     echo "mine" > "$target/$f"
   done
   git -C "$target" config core.hooksPath custom-hooks
-  run install --update --hooks "$target"
+  run install --update "$target"
   [ "$status" -eq 0 ]
   for f in .agents/tests/test-app/requirements.md .agents/backlog.md .agents/scout.md .agents/web-sources.md .agents/skills/own/SKILL.md; do
     [ "$(cat "$target/$f")" = mine ]
@@ -229,4 +224,21 @@ rules() {
   run --separate-stderr install --update "$target"
   [ "$status" -ne 0 ]
   [ "$(snapshot)" = "$before" ]
+}
+
+@test "R16: update replaces the old hooks and the CI file by the git hook" {
+  install "$target"
+  mkdir -p "$target/.agents/hooks" "$target/.github/workflows"
+  echo old > "$target/.agents/hooks/pre-commit"
+  echo old > "$target/.agents/hooks/pre-push"
+  echo old > "$target/.github/workflows/agents.yml"
+  git -C "$target" config core.hooksPath .agents/hooks
+  run install --update "$target"
+  [ "$status" -eq 0 ]
+  [ ! -e "$target/.agents/hooks/pre-commit" ]
+  [ ! -e "$target/.agents/hooks/pre-push" ]
+  [ ! -e "$target/.github/workflows/agents.yml" ]
+  [ -z "$(git -C "$target" config --local core.hooksPath)" ]
+  hook_files | same
+  [ -x "$(git_hook)" ]
 }

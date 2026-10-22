@@ -1,0 +1,5 @@
+#!/bin/sh
+hooks=$(cd "$(dirname "$0")" && pwd)
+node "$hooks/../metrics/metrics.mjs" --brief "$PWD" || true
+nohup sh "$hooks/qa.sh" > /dev/null 2>&1 &
+exit 0

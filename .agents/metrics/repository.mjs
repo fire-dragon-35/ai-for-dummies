@@ -11,28 +11,17 @@ const coverage = (repo) => {
     .map((entry) => {
       const directory = join(tests, entry.name)
       const requirements = [...read(join(directory, 'requirements.md')).matchAll(/^- R(\d+):/gm)].map((match) => Number(match[1])).sort((a, b) => a - b)
-      const names = readdirSync(directory)
-        .filter((name) => name.endsWith('.bats'))
-        .flatMap((name) => [...read(join(directory, name)).matchAll(/^@test "R(\d+):/gm)].map((match) => Number(match[1])))
-      return { component: entry.name, requirements: requirements.map((number) => ({ number, tested: names.includes(number) })), tests: names.length }
+      const numbers = (file, pattern) => [...(read(file) ?? '').matchAll(pattern)].map((match) => Number(match[1]))
+      const listed = (read(join(directory, 'tests')) ?? '').split('\n').filter((line) => line.trim())
+      const names = [
+        ...readdirSync(directory).filter((name) => name.endsWith('.bats')).flatMap((name) => numbers(join(directory, name), /^@test "R(\d+):/gm)),
+        ...listed.flatMap((line) => numbers(join(repo, line.trim()), /["'`]R(\d+):/g)),
+      ]
+      return { component: entry.name, requirements: requirements.map((number) => ({ number, tested: names.includes(number) })) }
     })
     .sort((a, b) => (a.component < b.component ? -1 : 1))
 }
 
-const scout = (repo) => {
-  const text = read(join(repo, '.agents', 'scout.md'))
-  if (text === null) return null
-  const sections = []
-  for (const line of text.split('\n')) {
-    if (line.startsWith('## ')) sections.push({ name: line.slice(3).trim(), checked: null, items: [] })
-    else if (sections.length && line.startsWith('last checked:')) sections.at(-1).checked = line.slice('last checked:'.length).trim()
-    else if (sections.length && line.startsWith('- ')) {
-      const [head, verdict = '', reason = '', link = ''] = line.slice(2).split(' | ').map((part) => part.trim())
-      const [date, ...name] = head.split(' ')
-      sections.at(-1).items.push({ date, name: name.join(' '), verdict, reason, link })
-    }
-  }
-  return sections
-}
+const backlog = (repo) => (read(join(repo, '.agents', 'backlog.md')) ?? '').split('\n').filter((line) => line.trim()).length
 
-export const loadRepository = (repo) => ({ coverage: coverage(repo), scout: scout(repo) })
+export const loadRepository = (repo) => ({ coverage: coverage(repo), backlog: backlog(repo) })

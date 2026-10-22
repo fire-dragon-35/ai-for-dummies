@@ -14,8 +14,8 @@ with_hooks() {
   git -c user.name=t -c user.email=t@t commit -qm init --no-verify
 }
 
-push() {
-  sh .agents/hooks/pre-push origin "$BATS_TEST_TMPDIR/remote" < /dev/null
+qa() {
+  sh .agents/hooks/qa.sh
 }
 
 result_of() {
@@ -34,8 +34,8 @@ result_of() {
 }
 
 @test "R100: adds the fifth argument as source" {
-  verdict check shellcheck pass "" .agents/hooks/pre-push
-  [ "$(q 'x.source' "$log")" = .agents/hooks/pre-push ]
+  verdict check shellcheck pass "" .agents/hooks/qa.sh
+  [ "$(q 'x.source' "$log")" = .agents/hooks/qa.sh ]
 }
 
 @test "R24: writes to the main log from a worktree and refuses bad calls" {
@@ -52,11 +52,10 @@ result_of() {
   [ -z "$(ls -A)" ]
 }
 
-@test "R25: the hooks log every check line" {
+@test "R25: the QA run logs every check line" {
   with_hooks
   printf '%s\n' '#!/bin/sh' '# explain' > run.sh
-  git add run.sh
-  run --separate-stderr sh .agents/hooks/pre-commit
+  run --separate-stderr qa
   [ "$status" -ne 0 ]
   [ "$(result_of 'no comments')" = check:fail ]
   detail="$(q 'x.name === "no comments" ? x.detail : undefined' "$log")"
@@ -64,68 +63,34 @@ result_of() {
   printf '%s\n' "$stderr" | grep -F 'no comments' | grep -qF "$detail"
   [ "$(result_of shellcheck)" = check:pass ]
   [ "$(result_of 'line limit')" = check:pass ]
-  [ "$(result_of 'reviewed tests')" = check:pass ]
 }
 
-@test "R101: the hooks log the path of the hook as source" {
+@test "R101: the QA run logs its own path as source" {
   with_hooks
-  run --separate-stderr push
-  [ "$(q 'x.kind === "check" ? x.source : undefined' "$log" | sort -u)" = .agents/hooks/pre-push ]
-  printf '%s\n' '#!/bin/sh' '# explain' > run.sh
-  git add run.sh
-  run --separate-stderr sh .agents/hooks/pre-commit
-  [ "$(q 'x.name === "no comments" ? x.source : undefined' "$log")" = .agents/hooks/pre-commit ]
+  run --separate-stderr qa
+  [ "$(q 'x.kind === "check" ? x.source : undefined' "$log" | sort -u)" = .agents/hooks/qa.sh ]
 }
 
-@test "R26: pre-push logs every test" {
+@test "R26: the QA run logs every test" {
   with_hooks '@test "R4: fails" { false; }'
-  run --separate-stderr push
+  run --separate-stderr qa
   [ "$status" -ne 0 ]
   [ "$(result_of 'R1: passes')" = test:pass ]
   [ "$(result_of 'R2: has a "quote"')" = test:pass ]
   [ "$(result_of 'R3: skipped')" = test:skip ]
   [ "$(result_of 'R4: fails')" = test:fail ]
-  [ "$(result_of shellcheck)" = check:pass ]
+  first="$(q 'x.kind === "test" ? x.detail : undefined' "$log" | sort -u)"
+  [ "$(printf '%s\n' "$first" | wc -l)" -eq 1 ]
+  sleep 1
+  run --separate-stderr qa
+  [ "$(q 'x.kind === "test" ? x.detail : undefined' "$log" | sort -u | wc -l)" -eq 2 ]
 }
 
-@test "R108: the hooks log how many seconds the checks and the test suite took" {
+@test "R108: the QA run logs how many seconds the checks and the test suite took" {
   with_hooks '@test "R4: slow" { sleep 2; }'
-  run --separate-stderr sh .agents/hooks/pre-commit
-  [ "$(q 'x.kind === "duration" ? x.name : undefined' "$log")" = checks ]
-  [[ "$(q 'x.kind === "duration" ? x.result : undefined' "$log")" =~ ^[0-9]{1,2}$ ]]
-  run --separate-stderr push
+  run --separate-stderr qa
+  [ "$(q 'x.kind === "duration" && x.name === "checks" ? x.result : undefined' "$log" | wc -l)" -eq 1 ]
+  [[ "$(q 'x.kind === "duration" && x.name === "checks" ? x.result : undefined' "$log")" =~ ^[0-9]{1,2}$ ]]
   [ "$(q 'x.kind === "duration" && x.name === "tests" ? x.result : undefined' "$log" | wc -l)" -eq 1 ]
   [ "$(q 'x.kind === "duration" && x.name === "tests" ? /^\d+$/.test(x.result) && Number(x.result) >= 2 && Number(x.result) < 60 : undefined' "$log")" = true ]
-}
-
-@test "R27: pre-push writes the dashboard and prints its link" {
-  mv "$repo" "$BATS_TEST_TMPDIR/with space"
-  repo="$BATS_TEST_TMPDIR/with space"
-  log="$repo/.git/ai-for-dummies/metrics.jsonl"
-  cd "$repo" || return 1
-  with_hooks
-  run --separate-stderr push
-  [ "$status" -eq 0 ]
-  link="$(printf '%s\n' "$stderr" | grep -o 'file://[^ ]*dashboard.html')"
-  [[ "$link" == *with%20space* ]]
-  [ -s "$repo/.git/ai-for-dummies/dashboard.html" ]
-  grep -q 'shellcheck' "$repo/.git/ai-for-dummies/dashboard.html"
-}
-
-@test "R27: a dashboard that cannot be written keeps the exit status" {
-  with_hooks
-  mkdir -p "$repo/.git/ai-for-dummies/dashboard.html"
-  run --separate-stderr push
-  [ "$status" -eq 0 ]
-}
-
-@test "R28: without the metrics the hooks write no log and no dashboard" {
-  with_hooks
-  rm -r "$repo/.agents/metrics"
-  git add -A
-  git -c user.name=t -c user.email=t@t commit -qm drop --no-verify
-  run --separate-stderr push
-  [ "$status" -eq 0 ]
-  [ ! -e "$repo/.git/ai-for-dummies" ]
-  [[ "$stderr" != *dashboard* ]]
 }

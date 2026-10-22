@@ -4,19 +4,19 @@ Agent setup for any git repository: shared rules, skills, a repository map and t
 ## Install
 ```sh
 git clone https://github.com/fire-dragon-35/ai-for-dummies.git
-sh ai-for-dummies/install.sh [--hooks] [--metrics] [--ci] <target-repository>
+sh ai-for-dummies/install.sh [--hooks] <target-repository>
 ```
 Adds `.agents/`, `.claude/skills` and a marked block in `AGENTS.md` and `CLAUDE.md`. Stops if anything it adds already exists
 
 | Option | Adds | Needs |
 |---|---|---|
-| `--hooks` | rule check on commit, shellcheck and tests on push (concurrent with GNU parallel) | no existing git hooks |
-| `--metrics` | usage, cost, energy and verdict report | Node |
-| `--ci` | the push checks in GitHub Actions | `--hooks` |
+| `--hooks` | a `post-commit` git hook that prints the stats and starts the quality checks and tests in the background, plus the usage, cost and energy report | Node, no existing `post-commit` hook, no `core.hooksPath` |
+
+Nothing ever blocks or slows a commit or push. There are no other git hooks and no GitHub Actions. Agents run `sh .agents/hooks/qa.sh` in the background while they work. It also runs the project's own tests when `.agents/test-command` holds their command, such as `npm test`
 
 Update: `git -C ai-for-dummies pull && sh ai-for-dummies/install.sh --update <target-repository>`. Your tests, notes and skills are kept
 
-Remove: delete `.agents/`, `.claude/skills` and the marked blocks; with hooks, `git config --unset core.hooksPath`
+Remove: delete `.agents/`, `.claude/skills` and the marked blocks; with hooks, delete `.git/hooks/post-commit`
 
 ## Skills
 Claude Code: `/<skill>`. Other agents: ask by name
@@ -27,19 +27,19 @@ Claude Code: `/<skill>`. Other agents: ask by name
 | `scout` | checks toplists and news for new MCP servers, skills and AI tech |
 | `grilling` | interviews you about a plan |
 | `review-tests` | reviews one test component as a subagent |
-| `metrics` | reports usage, cost, energy and verdicts (`--metrics`) |
+| `metrics` | reports usage, cost, energy and verdicts (`--hooks`) |
+| `benchmark` | compares the same prompt with and without the setup (this repository only) |
 
 ## Metrics
-`node .agents/metrics/metrics.mjs [--html]` prints the report or writes `.git/ai-for-dummies/dashboard.html`. With hooks, every push writes it
+Every commit prints a short summary from the previous background run: prompts and active time with the token mix, daily graphs of tokens, cost and energy, the checks and the tests, with failures named. `NO_COLOR` turns the colors off, `FORCE_COLOR` keeps them in a pipe. `node .agents/metrics/metrics.mjs [--brief]` prints the full report or the summary
 
 - Usage: read from Claude Code session files in `~/.claude/projects`
 - Cost: LiteLLM list prices, cached weekly
 - Energy: [EcoLogits](https://github.com/mlco2/ecologits) minimum estimate, cached weekly
-- Style: `.agents/metrics/tokens.css`
 
 ## Files
 | Place | Holds | Committed |
 |---|---|---|
 | `.agents/skills/`, `hooks/`, `metrics/`, `repository-context/*.sh` | the setup, replaced by `--update` | yes |
-| `.agents/tests/`, `backlog.md`, `scout.md`, `web-sources.md` | yours | yes |
-| `.git/ai-for-dummies/` | verdict log, caches, dashboard | no |
+| `.agents/tests/`, `test-command`, `backlog.md`, `scout.md`, `web-sources.md` | yours | yes |
+| `.git/ai-for-dummies/` | verdict log, caches | no |

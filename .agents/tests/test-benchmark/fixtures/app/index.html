@@ -1,0 +1,15 @@
+<!doctype html>
+<html>
+<body>
+<ul id="lists"></ul>
+<script>
+fetch('/api/lists').then((response) => response.json()).then((lists) => {
+  for (const list of lists) {
+    const entry = document.createElement('li')
+    entry.textContent = list.name
+    document.getElementById('lists').append(entry)
+  }
+})
+</script>
+</body>
+</html>
